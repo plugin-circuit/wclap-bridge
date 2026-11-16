@@ -41,6 +41,9 @@ bool wclap_wasmtime::InstanceGroup::globalInit(unsigned int timeLimitMs) {
 		return false;
 	}
 
+	// Many WCLAPs are C++ built with -fwasm-exceptions (e.g. JUCE ports): enable the exceptions proposal
+	wasmtime_config_wasm_exceptions_set(config, true);
+
 	if (timeLimitMs > 0) {
 		// enable epoch_interruption to prevent WCLAPs locking everything up - has a speed cost (10% according to docs)
 		wasmtime_config_epoch_interruption_set(config, true);
