@@ -781,27 +781,29 @@ private:
 	bool gui_get_preferred_api(const char **api, bool *isFloating) {
 		return webviewGui.getPreferredApi(api, isFloating);
 	}
+	bool wclapGuiCreated = false; // only call the WCLAP's gui methods between a successful create() and destroy()
 	bool gui_create(const char *api, bool isFloating) {
 		if (!webviewGui.create(api, isFloating)) return false;
 		if (guiExt) {
 			// Create a webview GUI in the WCLAP, but continue whether it succeeds or not
 			auto scoped = module.arenaPool.scoped();
 			auto str = scoped.writeString(CLAP_WINDOW_API_WEBVIEW);
-			mainThread->call(guiExt[&wclap_plugin_gui::create], ptr, str, isFloating);
+			wclapGuiCreated = mainThread->call(guiExt[&wclap_plugin_gui::create], ptr, str, isFloating);
 		}
 		return true;
 	}
 	void gui_destroy() {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			mainThread->call(guiExt[&wclap_plugin_gui::destroy], ptr);
 		}
+		wclapGuiCreated = false;
 		webviewGui.destroy();
 	}
 	bool gui_set_scale(double scale) {
 		return webviewGui.setScale(scale);
 	}
 	bool gui_get_size(uint32_t *w, uint32_t *h) {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			auto scoped = module.arenaPool.scoped();
 			auto wPtr = scoped.copyAcross(uint32_t(0));
 			auto hPtr = scoped.copyAcross(uint32_t(0));
@@ -815,13 +817,13 @@ private:
 		return webviewGui.getSize(w, h);
 	}
 	bool gui_can_resize() {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			return mainThread->call(guiExt[&wclap_plugin_gui::can_resize], ptr);
 		}
 		return webviewGui.canResize();
 	}
 	bool gui_get_resize_hints(clap_gui_resize_hints *hints) {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			auto scoped = module.arenaPool.scoped();
 			auto hintsPtr = scoped.copyAcross(wclap_gui_resize_hints{});
 			if (mainThread->call(guiExt[&wclap_plugin_gui::get_resize_hints], ptr, hintsPtr)) {
@@ -833,7 +835,7 @@ private:
 		return webviewGui.getResizeHints(hints);
 	}
 	bool gui_adjust_size(uint32_t *w, uint32_t *h) {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			auto scoped = module.arenaPool.scoped();
 			auto wPtr = scoped.copyAcross(*w);
 			auto hPtr = scoped.copyAcross(*h);
@@ -846,7 +848,7 @@ private:
 		return webviewGui.adjustSize(w, h);
 	}
 	bool gui_set_size(uint32_t w, uint32_t h) {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			mainThread->call(guiExt[&wclap_plugin_gui::set_size], ptr, w, h);
 		}
 		return webviewGui.setSize(w, h);
@@ -858,7 +860,7 @@ private:
 		return webviewGui.setTransient(window);
 	}
 	void gui_suggest_title(const char *title) {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			auto scoped = module.arenaPool.scoped();
 			auto titlePtr = scoped.writeString(title);
 			mainThread->call(guiExt[&wclap_plugin_gui::suggest_title], ptr, titlePtr);
@@ -866,13 +868,13 @@ private:
 		webviewGui.suggestTitle(title);
 	}
 	bool gui_show() {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			mainThread->call(guiExt[&wclap_plugin_gui::show], ptr);
 		}
 		return webviewGui.show();
 	}
 	bool gui_hide() {
-		if (guiExt) {
+		if (guiExt && wclapGuiCreated) {
 			mainThread->call(guiExt[&wclap_plugin_gui::hide], ptr);
 		}
 		return webviewGui.hide();
