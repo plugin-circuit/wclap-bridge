@@ -19,6 +19,9 @@ bool wclap_global_init_with_cache(unsigned int timeLimitMs, const char *compileC
 // max 0.9), then outputs a silent block instead of waiting; that block's events are replayed in the next one.
 // Any thread, any time. Default 0.2.
 void wclap_set_audio_wait_ratio(float ratio);
+// Whether such a skipped block is concealed: each channel continued from its recent output (linear prediction) and
+// faded out, then crossfaded back into real audio, instead of cutting to silence. No added latency. Default on.
+void wclap_set_conceal_dropouts(bool conceal);
 // Blocks skipped that way since start (all WCLAPs).
 uint64_t wclap_audio_skipped_blocks();
 void wclap_global_deinit();

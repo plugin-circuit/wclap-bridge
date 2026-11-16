@@ -69,6 +69,9 @@ private:
 // How long the audio thread may spin for a busy single-threaded instance, as a fraction of the current block's
 // duration (0 = try once). Set with wclap_set_audio_wait_ratio().
 inline std::atomic<float> audioWaitRatio{0.2f};
+// Whether a skipped block is concealed (its audio continued from the last output and faded, dropout-concealer.h)
+// instead of silent. Set with wclap_set_conceal_dropouts().
+inline std::atomic<bool> concealDropouts{true};
 // Blocks skipped because the instance stayed busy past the deadline, since start.
 inline std::atomic<std::uint64_t> audioSkippedBlocks{0};
 

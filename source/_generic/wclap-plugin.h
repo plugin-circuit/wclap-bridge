@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 #include "../realtime-lock.h"
+#include "../dropout-concealer.h"
 #include <string_view>
 #include <fstream>
 
@@ -300,6 +301,7 @@ private:
 	}
 	bool pluginActivate(double sRate, uint32_t minFrames, uint32_t maxFrames) {
 		activeSampleRate = sRate > 0 ? sRate : 48000;
+		if (!maybeAudioThread) concealer.prepare(kConcealChannels, activeSampleRate); // allocates: main thread
 		return audioThread->call(ptr[&wclap_plugin::activate], ptr, sRate, minFrames, maxFrames);
 	}
 	void pluginDeactivate() {
@@ -320,6 +322,12 @@ private:
 	// Preallocated; events that don't fit are dropped.
 	std::vector<unsigned char> carriedEvents = std::vector<unsigned char>(64 * 1024);
 	size_t carriedSize = 0;
+	// Continues the output through skipped blocks instead of cutting to silence (prepared in activate)
+	wclap_bridge::DropoutConcealer concealer;
+	static constexpr uint32_t kConcealChannels = 32; // output channels over all ports; more are silenced
+	bool concealing() const {
+		return !maybeAudioThread && concealer.maxChannels() > 0 && wclap_bridge::concealDropouts.load(std::memory_order_relaxed);
+	}
 
 	void carryEvents(const clap_input_events *in) {
 		const uint32_t count = in->size(in);
@@ -334,14 +342,22 @@ private:
 		}
 	}
 	void skipBlock(const clap_process *process) {
+		const bool conceal = concealing();
+		uint32_t index = 0;
 		for (uint32_t port = 0; port < process->audio_outputs_count; ++port) {
 			auto &buffer = process->audio_outputs[port];
-			for (uint32_t c = 0; c < buffer.channel_count; ++c) {
-				if (buffer.data32 && buffer.data32[c]) std::fill_n(buffer.data32[c], process->frames_count, 0.0f);
-				if (buffer.data64 && buffer.data64[c]) std::fill_n(buffer.data64[c], process->frames_count, 0.0);
+			for (uint32_t c = 0; c < buffer.channel_count; ++c, ++index) {
+				if (conceal) {
+					if (buffer.data32 && buffer.data32[c]) concealer.conceal(index, buffer.data32[c], process->frames_count);
+					if (buffer.data64 && buffer.data64[c]) concealer.conceal(index, buffer.data64[c], process->frames_count);
+				} else {
+					if (buffer.data32 && buffer.data32[c]) std::fill_n(buffer.data32[c], process->frames_count, 0.0f);
+					if (buffer.data64 && buffer.data64[c]) std::fill_n(buffer.data64[c], process->frames_count, 0.0);
+				}
 			}
-			buffer.constant_mask = ~uint64_t(0);
+			buffer.constant_mask = conceal ? 0 : ~uint64_t(0);
 		}
+		if (conceal) concealer.endBlock(true, process->frames_count);
 		carryEvents(process->in_events);
 		wclap_bridge::audioSkippedBlocks.fetch_add(1, std::memory_order_relaxed);
 	}
@@ -471,6 +487,18 @@ private:
 					checkBuffers(buffer.data64[c], wProcess.frames_count);
 				}
 			}
+		}
+		// single-threaded: remember the output (for a later skipped block), and crossfade out of a concealed gap
+		if (concealing()) {
+			uint32_t index = 0;
+			for (uint32_t portIndex = 0; portIndex < wProcess.audio_outputs_count; ++portIndex) {
+				auto &buffer = process->audio_outputs[portIndex];
+				for (uint32_t c = 0; c < buffer.channel_count; ++c, ++index) {
+					if (buffer.data32 && buffer.data32[c]) concealer.played(index, buffer.data32[c], wProcess.frames_count);
+					else if (buffer.data64 && buffer.data64[c]) concealer.played(index, buffer.data64[c], wProcess.frames_count);
+				}
+			}
+			concealer.endBlock(false, wProcess.frames_count);
 		}
 		
 		return resultCode;
