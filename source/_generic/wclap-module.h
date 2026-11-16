@@ -259,13 +259,14 @@ struct WclapModule : public WclapModuleBase {
 		auto &self = *(WclapModule *)context;
 		auto hostExtStr = self.mainThread->getString(extId, 1024);
 
-		auto *plugin = getPlugin(context, wHost);
-		if (!plugin) return {0};
-		
 		if (hostExtStr == CLAP_EXT_WEBVIEW) {
-			// Special-cased because we provide it to the plugin even if the host doesn't
+			// Special-cased because we provide it to the plugin even if the host doesn't. Checked before the plugin
+			// lookup: WCLAPs may query it during create(), before the instance is registered (send() resolves it later).
 			return self.hostWebviewPtr.cast<const void>();
 		}
+
+		auto *plugin = getPlugin(context, wHost);
+		if (!plugin) return {0};
 		
 		const void *nativeHostExt = plugin->host->get_extension(plugin->host, hostExtStr.c_str());
 		if (!nativeHostExt) return {0};
