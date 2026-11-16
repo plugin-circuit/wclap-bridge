@@ -427,7 +427,8 @@ private:
 		auto scoped = module.arenaPool.scoped();
 		auto extIdPtr = scoped.writeString(pluginExtId);
 		auto wclapExt = mainThread->call(ptr[&wclap_plugin::get_extension], ptr, extIdPtr);
-		if (!wclapExt) return nullptr;
+		// clap.gui is ours to provide (webview-gui hosts the WCLAP's page): a WCLAP may offer only the webview extension
+		if (!wclapExt && std::strcmp(pluginExtId, CLAP_EXT_GUI) != 0) return nullptr;
 		
 		if (!std::strcmp(pluginExtId, CLAP_EXT_AMBISONIC)) {
 			ambisonicExt = wclapExt.cast<const wclap_plugin_ambisonic>();
@@ -491,9 +492,12 @@ private:
 				.show=clapPluginMethod<&Plugin::gui_show>(),
 				.hide=clapPluginMethod<&Plugin::gui_hide>(),
 			};
-			guiExt = wclapExt.cast<const wclap_plugin_gui>();
-			if (!webviewExt) webviewExt = wclapExt.cast<const wclap_plugin_webview>();
-			return guiExt ? &ext : nullptr; // depends on the WCLAP's webview extension, not the GUI one
+			guiExt = wclapExt.cast<const wclap_plugin_gui>(); // optional: a WCLAP may implement only clap.webview
+			if (!webviewExt) {
+				auto webviewIdPtr = scoped.writeString(CLAP_EXT_WEBVIEW);
+				webviewExt = mainThread->call(ptr[&wclap_plugin::get_extension], ptr, webviewIdPtr).cast<const wclap_plugin_webview>();
+			}
+			return webviewExt ? &ext : nullptr; // the GUI is the WCLAP's webview page: no webview, no GUI
 		} else if (!std::strcmp(pluginExtId, CLAP_EXT_LATENCY)) {
 			latencyExt = wclapExt.cast<const wclap_plugin_latency>();
 			static const clap_plugin_latency ext{
