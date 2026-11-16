@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "wclap-bridge.h"
+#include "./realtime-lock.h"
 
 #include "./instance.h"
 #include "./wclap-module.h"
@@ -38,6 +39,12 @@ bool wclap_global_init_with_cache(unsigned int timeLimitMs, const char *compileC
 	globalInitCacheConfig = cacheConfig;
 	globalInitOK = instanceGlobalInit(ms, compileCacheConfig);
 	return globalInitOK;
+}
+void wclap_set_audio_wait_ratio(float ratio) {
+	wclap_bridge::audioWaitRatio.store(ratio < 0 ? 0.f : (ratio > 0.9f ? 0.9f : ratio), std::memory_order_relaxed);
+}
+uint64_t wclap_audio_skipped_blocks() {
+	return wclap_bridge::audioSkippedBlocks.load(std::memory_order_relaxed);
 }
 void wclap_global_deinit() {
 	std::lock_guard<std::mutex> lock{globalInitMutex};

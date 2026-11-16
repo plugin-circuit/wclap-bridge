@@ -1,6 +1,11 @@
 // No `#pragma once`, because we deliberately get included multiple times by `../wclap.h`, with different WCLAP_API_NAMESPACE, WCLAP_BRIDGE_NAMESPACE and WCLAP_BRIDGE_IS64 values
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstring>
+#include <vector>
+#include "../realtime-lock.h"
 #include <string_view>
 #include <fstream>
 
@@ -294,6 +299,7 @@ private:
 		module.pluginList.release(pluginListIndex);
 	}
 	bool pluginActivate(double sRate, uint32_t minFrames, uint32_t maxFrames) {
+		activeSampleRate = sRate > 0 ? sRate : 48000;
 		return audioThread->call(ptr[&wclap_plugin::activate], ptr, sRate, minFrames, maxFrames);
 	}
 	void pluginDeactivate() {
@@ -308,7 +314,59 @@ private:
 	void pluginReset() {
 		audioThread->call(ptr[&wclap_plugin::reset], ptr);
 	}
+	// ---- single-threaded WCLAPs: the audio thread never waits for the main thread (realtime-lock.h) ----
+	double activeSampleRate = 48000;
+	// Events of skipped blocks, replayed at the start of the next processed block (so a note-off is never lost).
+	// Preallocated; events that don't fit are dropped.
+	std::vector<unsigned char> carriedEvents = std::vector<unsigned char>(64 * 1024);
+	size_t carriedSize = 0;
+
+	void carryEvents(const clap_input_events *in) {
+		const uint32_t count = in->size(in);
+		for (uint32_t i = 0; i < count; ++i) {
+			auto *event = in->get(in, i);
+			if (event->space_id != CLAP_CORE_EVENT_SPACE_ID || event->type == CLAP_EVENT_TRANSPORT) continue;
+			const size_t size = (event->size + 7) & ~size_t(7);
+			if (carriedSize + size > carriedEvents.size()) return;
+			std::memcpy(carriedEvents.data() + carriedSize, event, event->size);
+			reinterpret_cast<clap_event_header *>(carriedEvents.data() + carriedSize)->time = 0;
+			carriedSize += size;
+		}
+	}
+	void skipBlock(const clap_process *process) {
+		for (uint32_t port = 0; port < process->audio_outputs_count; ++port) {
+			auto &buffer = process->audio_outputs[port];
+			for (uint32_t c = 0; c < buffer.channel_count; ++c) {
+				if (buffer.data32 && buffer.data32[c]) std::fill_n(buffer.data32[c], process->frames_count, 0.0f);
+				if (buffer.data64 && buffer.data64[c]) std::fill_n(buffer.data64[c], process->frames_count, 0.0);
+			}
+			buffer.constant_mask = ~uint64_t(0);
+		}
+		carryEvents(process->in_events);
+		wclap_bridge::audioSkippedBlocks.fetch_add(1, std::memory_order_relaxed);
+	}
+
 	clap_process_status pluginProcess(const clap_process *process) {
+		// A single-threaded WCLAP shares one instance between the main and audio threads. If the main thread is inside
+		// it (a short call, or a long one: a preset load, an offline render), the audio thread spins for at most
+		// audioWaitRatio of this block's duration, then skips the block instead of waiting. The event list's lock is
+		// only tried, so the order against the main thread (events, then instance) can't deadlock.
+		std::unique_lock<wclap_bridge::RecursiveSpinMutex> instanceLock;
+		std::unique_lock<std::recursive_mutex> eventsLock{hostEventsMutex, std::defer_lock};
+		if (!maybeAudioThread) {
+			auto *mutex = module.instanceGroup->singleThreadMutex();
+			const double ratio = std::clamp(double(wclap_bridge::audioWaitRatio.load(std::memory_order_relaxed)), 0.0, 0.9);
+			const auto budget = std::chrono::nanoseconds(int64_t(ratio * 1e9 * process->frames_count / activeSampleRate));
+			if (!mutex || !wclap_bridge::tryLockFor(*mutex, budget)) {
+				skipBlock(process);
+				return CLAP_PROCESS_CONTINUE;
+			}
+			instanceLock = std::unique_lock<wclap_bridge::RecursiveSpinMutex>(*mutex, std::adopt_lock);
+			if (!eventsLock.try_lock()) {
+				skipBlock(process);
+				return CLAP_PROCESS_CONTINUE;
+			}
+		}
 		auto scoped = arena->scoped(); // use the audio-thread arena
 
 		auto inEvents = scoped.copyAcross(module.inputEventsTemplate);
@@ -317,8 +375,15 @@ private:
 		module.setPlugin(outEvents, pluginListIndex);
 
 		// Input/output events
-		std::unique_lock<std::recursive_mutex> lock{hostEventsMutex};
+		if (!eventsLock.owns_lock()) eventsLock.lock(); // with shared memory: the host never flushes while processing
 		inputEvents.resize(0);
+		// events of skipped blocks first (time 0, so the list stays sorted)
+		for (size_t offset = 0; offset < carriedSize;) {
+			auto *event = reinterpret_cast<const clap_event_header *>(carriedEvents.data() + offset);
+			tryCopyInputEvent(scoped, event);
+			offset += (event->size + 7) & ~size_t(7);
+		}
+		carriedSize = 0;
 		// Copy across (a recognised/translatable subset of) input events
 		auto *eventsIn = process->in_events;
 		uint32_t count = eventsIn->size(eventsIn);

@@ -6,6 +6,7 @@
 #endif
 
 #include "wclap/instance.hpp"
+#include "../realtime-lock.h"
 
 #include "wasmtime.h"
 
@@ -389,6 +390,11 @@ struct InstanceGroup {
 	wclap::Instance<InstanceImpl> *singleThread = nullptr;
 	// If the WCLAP is single-threaded, this will only succeed once, and return `nullptr` from then on
 	std::unique_ptr<wclap::Instance<InstanceImpl>> startInstance();
+
+	// A single-threaded WCLAP (no shared memory) has one instance for every thread, and each call locks it. The audio
+	// thread takes this lock for its whole block with a bounded try (realtime-lock.h). Null with shared memory.
+	wclap_bridge::RecursiveSpinMutex *singleThreadMutex();
+	InstanceImpl *singleThreadImpl = nullptr; // set by the single-threaded instance
 	
 	void * wasiThreadSpawnContext = nullptr;
 	int32_t (*wasiThreadSpawn)(void *context, uint64_t threadArg) = nullptr;
@@ -408,7 +414,9 @@ struct InstanceImpl {
 	InstanceGroup &group;
 
 	uint64_t wclapEntryAs64;
-	std::recursive_mutex callMutex; // has to be recursive in case a WCLAP function calls out to a host which then calls a WCLAP function etc.
+	// has to be recursive in case a WCLAP function calls out to a host which then calls a WCLAP function etc.
+	// A spin lock: in single-threaded mode the audio thread shares it and may only try (realtime-lock.h).
+	wclap_bridge::RecursiveSpinMutex callMutex;
 
 	// Delete these (in reverse order) if they're defined
 	wasmtime_store_t *wtStore = nullptr;
@@ -422,10 +430,12 @@ struct InstanceImpl {
 	wasmtime_instance_t wtInstance;
 
 	InstanceImpl(void *handle, InstanceGroup &group) : handle(handle), group(group) {
+		if (!group.wtSharedMemory) group.singleThreadImpl = this;
 		if (!setup()) return;
 	}
 	InstanceImpl(const InstanceImpl &other) = delete;
 	~InstanceImpl() {
+		if (group.singleThreadImpl == this) group.singleThreadImpl = nullptr;
 		if (wtLinker) wasmtime_linker_delete(wtLinker);
 		if (wtStore) wasmtime_store_delete(wtStore);
 	}
@@ -474,7 +484,7 @@ struct InstanceImpl {
 			wasmP = std::min<uint64_t>(wasmP, memorySize - size);
 			return wasmtime_sharedmemory_data(group.wtSharedMemory) + wasmP;
 		} else {
-			std::lock_guard<std::recursive_mutex> lock(callMutex);
+			std::lock_guard<wclap_bridge::RecursiveSpinMutex> lock(callMutex);
 			auto memorySize = wasmtime_memory_data_size(wtContext, &wtMemory);
 			wasmP = std::min<uint64_t>(wasmP, memorySize - size);
 			return wasmtime_memory_data(wtContext, &wtMemory) + wasmP;
@@ -482,7 +492,7 @@ struct InstanceImpl {
 	}
 
 	void wtCall(uint64_t fnP, wasmtime_val_raw *argsAndResults, size_t argN) {
-		std::lock_guard<std::recursive_mutex> lock(callMutex);
+		std::lock_guard<wclap_bridge::RecursiveSpinMutex> lock(callMutex);
 		if (group.hasError()) {
 			if (argN > 0) argsAndResults[0].i64 = 0; // returns 0
 			return;
@@ -661,6 +671,10 @@ struct InstanceImpl {
 
 	static wasmtime_error_t * continueChecker(wasmtime_context_t *context, void *data, uint64_t *epochsDelta, wasmtime_update_deadline_kind_t *updateKind);
 };
+
+inline wclap_bridge::RecursiveSpinMutex *InstanceGroup::singleThreadMutex() {
+	return singleThreadImpl ? &singleThreadImpl->callMutex : nullptr;
+}
 
 }; // namespace
 

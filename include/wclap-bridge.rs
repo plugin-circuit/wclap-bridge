@@ -7,6 +7,8 @@ unsafe extern "C" {
         compileCacheConfig: *const ::std::os::raw::c_char,
     ) -> bool;
     pub fn wclap_global_deinit();
+    pub fn wclap_set_audio_wait_ratio(ratio: f32);
+    pub fn wclap_audio_skipped_blocks() -> u64;
 
     pub fn wclap_open(wclapDir: *const ::std::os::raw::c_char) -> *mut ::std::os::raw::c_void;
     pub fn wclap_open_with_dirs(

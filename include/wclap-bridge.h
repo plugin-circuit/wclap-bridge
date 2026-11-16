@@ -13,6 +13,14 @@ bool wclap_global_init(unsigned int timeLimitMs);
 // (e.g. its `directory` and `files-total-size-soft-limit`, see https://docs.wasmtime.dev/cli-cache.html).
 // Null uses Wasmtime's default cache settings, as `wclap_global_init()` does.
 bool wclap_global_init_with_cache(unsigned int timeLimitMs, const char *compileCacheConfig);
+
+// Single-threaded WCLAPs (no shared memory) share one instance between the main and audio threads. When the main
+// thread is inside it, the audio thread spins for at most `ratio` of the current block's duration (0 = try once,
+// max 0.9), then outputs a silent block instead of waiting; that block's events are replayed in the next one.
+// Any thread, any time. Default 0.2.
+void wclap_set_audio_wait_ratio(float ratio);
+// Blocks skipped that way since start (all WCLAPs).
+uint64_t wclap_audio_skipped_blocks();
 void wclap_global_deinit();
 
 // Opens a WCLAP, returning an opaque identifier (or null if there was an IO failure).  Even if it returns a non-null handle, you should immediately check `wclap_get_error()`

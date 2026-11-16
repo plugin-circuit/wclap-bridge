@@ -509,7 +509,7 @@ void wclap_wasmtime::InstanceImpl::runThread(uint32_t threadId, uint64_t threadA
 }
 
 uint64_t wclap_wasmtime::InstanceImpl::wtMalloc(size_t bytes) {
-	std::lock_guard<std::recursive_mutex> lock(callMutex);
+	std::lock_guard<wclap_bridge::RecursiveSpinMutex> lock(callMutex);
 
 	uint64_t wasmP;
 	
