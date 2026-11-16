@@ -1178,51 +1178,74 @@ private:
 		return result;
 	}
 	bool webview_get_resource(const char *path, char *mime, uint32_t mimeCapacity, const clap_ostream *ostream) {
-		if (wasFileUri) {
-			auto mapped = module.instanceGroup->mapPath(path);
-			if (!mapped) return false;
-			for (size_t i = 0; i < mapped->size(); ++i) {
-				auto c = (*mapped)[i];
-				if (c == '?' || c == '#') { // trim query/hash
-					mapped->resize(i);
-					break;
-				}
+		if (wasFileUri) return serveFile(path, mime, mimeCapacity, ostream);
+		if (webviewGetResourceFromPlugin(path, mime, mimeCapacity, ostream)) return true;
+		// Relative URIs whose resources the WCLAP doesn't provide come from its bundle (e.g. the JUCE-kit ports,
+		// whose get_resource returns false: "hosts serve the bundle").
+		if (path[0] != '/') return false;
+		return serveFile((std::string("/plugin.wclap") + path).c_str(), mime, mimeCapacity, ostream);
+	}
+	// A request path (percent-encoded, maybe with ?query/#hash) to a safe virtual path: decoded, without the query or
+	// hash, and refused if it could leave its directory (`..` components, backslashes, NUL bytes).
+	static bool decodeRequestPath(const char *requestPath, std::string &decoded) {
+		auto hex = [](char h) -> int {
+			if (h >= '0' && h <= '9') return h - '0';
+			if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+			if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+			return -1;
+		};
+		decoded.clear();
+		for (const char *c = requestPath; *c && *c != '?' && *c != '#'; ++c) {
+			if (c[0] == '%' && c[1] && c[2] && hex(c[1]) >= 0 && hex(c[2]) >= 0) {
+				decoded += char(hex(c[1]) * 16 + hex(c[2]));
+				c += 2;
+			} else {
+				decoded += *c;
 			}
-			
-			auto mimeGuess = webview_gui::helpers::guessMediaType(path);
-			std::strncpy(mime, mimeGuess.c_str(), mimeCapacity);
-			
-			std::ifstream stream{*mapped, std::ios::binary|std::ios::ate};
-			if (!stream) {
-				std::cerr << "WCLAP: couldn't open file: " << *mapped << std::endl;
-				return false;
-			}
-			
-			std::vector<char> buffer;
-			auto bufferSize = stream.tellg();
-			if (bufferSize > 100*1024*1024) {
-				std::cerr << "WCLAP: refused to serve webview UI resource of > 100MB: " << bufferSize << std::endl;
-				return false; // This is a webview UI, 100MB max file-size is more than generous
-			}
-			buffer.resize(bufferSize); // we opened at the end, so this is the file size
-			stream.seekg(0);
-			// Read entire file into memory at once
-			if (stream.read(buffer.data(), buffer.size())) {
-				size_t index = 0;
-				while (index < buffer.size()) {
-					auto result = ostream->write(ostream, (const void *)(buffer.data() + index), uint64_t(buffer.size() - index));
-					if (result <= 0) {
-						std::cerr << "WCLAP: failed to write to stream: " << result << std::endl;
-						return false;
-					}
-					index += result;
-				}
-				return true;
-			}
-			std::cerr << "WCLAP: couldn't read file: " << *mapped << std::endl;
+		}
+		if (decoded.find('\\') != std::string::npos || decoded.find('\0') != std::string::npos) return false;
+		return ("/" + decoded + "/").find("/../") == std::string::npos;
+	}
+	bool serveFile(const char *virtualPath, char *mime, uint32_t mimeCapacity, const clap_ostream *ostream) {
+		std::string decoded;
+		if (!decodeRequestPath(virtualPath, decoded)) return false;
+		auto mapped = module.instanceGroup->mapPath(decoded);
+		if (!mapped) return false;
+
+		auto mimeGuess = webview_gui::helpers::guessMediaType(decoded.c_str());
+		std::strncpy(mime, mimeGuess.c_str(), mimeCapacity);
+
+		std::ifstream stream{*mapped, std::ios::binary|std::ios::ate};
+		if (!stream) {
+			std::cerr << "WCLAP: couldn't open file: " << *mapped << std::endl;
 			return false;
 		}
-
+		
+		std::vector<char> buffer;
+		auto bufferSize = stream.tellg();
+		if (bufferSize > 100*1024*1024) {
+			std::cerr << "WCLAP: refused to serve webview UI resource of > 100MB: " << bufferSize << std::endl;
+			return false; // This is a webview UI, 100MB max file-size is more than generous
+		}
+		buffer.resize(bufferSize); // we opened at the end, so this is the file size
+		stream.seekg(0);
+		// Read entire file into memory at once
+		if (stream.read(buffer.data(), buffer.size())) {
+			size_t index = 0;
+			while (index < buffer.size()) {
+				auto result = ostream->write(ostream, (const void *)(buffer.data() + index), uint64_t(buffer.size() - index));
+				if (result <= 0) {
+					std::cerr << "WCLAP: failed to write to stream: " << result << std::endl;
+					return false;
+				}
+				index += result;
+			}
+			return true;
+		}
+		std::cerr << "WCLAP: couldn't read file: " << *mapped << std::endl;
+		return false;
+	}
+	bool webviewGetResourceFromPlugin(const char *path, char *mime, uint32_t mimeCapacity, const clap_ostream *ostream) {
 		auto scoped = module.arenaPool.scoped();
 		auto streamPtr = scoped.copyAcross(module.ostreamTemplate);
 		module.setPlugin(streamPtr, pluginListIndex);
