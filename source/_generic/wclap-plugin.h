@@ -207,26 +207,43 @@ struct Plugin {
 	std::recursive_mutex hostStreamsMutex;
 	const clap_istream *hostIstream = nullptr;
 	const clap_ostream *hostOstream = nullptr;
+	// Stream proxies move the whole request in 1 kB chunks: CLAP allows short reads/writes, but many plugins
+	// assume a single call transfers everything (e.g. webview get_resource, state save/load).
 	int64_t istreamRead(Pointer<void> buffer, uint64_t size) {
 		std::unique_lock<std::recursive_mutex> lock{hostStreamsMutex};
 		if (!hostIstream) return -1;
-		
-		if (size > 1024) size = 1024; // 1kB max
+
 		unsigned char localBuffer[1024];
-		auto result = hostIstream->read(hostIstream, localBuffer, size);
-		if (result > 0 && result <= 1024) {
-			mainThread->setArray(buffer.cast<unsigned char>(), localBuffer, result);
+		uint64_t total = 0;
+		while (total < size) {
+			auto chunk = std::min<uint64_t>(size - total, sizeof(localBuffer));
+			auto result = hostIstream->read(hostIstream, localBuffer, chunk);
+			if (result < 0) return total ? int64_t(total) : result;
+			if (result == 0) break;
+			mainThread->setArray((buffer.cast<unsigned char>() + total), localBuffer, (size_t)result);
+			total += uint64_t(result);
+			if (uint64_t(result) < chunk) break; // the host stream gave what it has
 		}
-		return result;
+		return int64_t(total);
 	}
 	int64_t ostreamWrite(Pointer<const void> buffer, uint64_t size) {
 		std::unique_lock<std::recursive_mutex> lock{hostStreamsMutex};
 		if (!hostOstream) return -1;
-		
-		if (size > 1024) size = 1024; // 1kB max
+
 		unsigned char localBuffer[1024];
-		mainThread->getArray(buffer.cast<unsigned char>(), localBuffer, size);
-		return hostOstream->write(hostOstream, localBuffer, size);
+		uint64_t total = 0;
+		while (total < size) {
+			auto chunk = std::min<uint64_t>(size - total, sizeof(localBuffer));
+			mainThread->getArray((buffer.cast<unsigned char>() + total), localBuffer, (size_t)chunk);
+			uint64_t written = 0;
+			while (written < chunk) {
+				auto result = hostOstream->write(hostOstream, localBuffer + written, chunk - written);
+				if (result <= 0) return total + written ? int64_t(total + written) : result;
+				written += uint64_t(result);
+			}
+			total += chunk;
+		}
+		return int64_t(total);
 	}
 	std::mutex webviewMessageMutex;
 	std::vector<unsigned char> webviewMessageBuffer;
