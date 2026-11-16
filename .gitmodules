@@ -3,7 +3,7 @@
 	url = https://github.com/free-audio/clap
 [submodule "modules/webview-gui"]
 	path = modules/webview-gui
-	url = https://github.com/geraintluff/webview-gui.git
+	url = https://github.com/plugin-circuit/webview-gui.git
 [submodule "modules/wclap-cpp"]
 	path = modules/wclap-cpp
 	url = https://github.com/WebCLAP/wclap-cpp.git
