@@ -36,5 +36,12 @@ if(NOT TARGET wasmtime) # a parent project may provide its own Wasmtime build (e
 	include(wasmtime-fetched.cmake)
 endif()
 
+# Wasmtime compile target, e.g. "pulley64" (the portable interpreter, for platforms without executable memory: iOS).
+# Empty: the native Cranelift backend.
+set(WCLAP_WASMTIME_TARGET "" CACHE STRING "Wasmtime compile target (empty: native)")
+if(WCLAP_WASMTIME_TARGET)
+	target_compile_definitions(wclap-bridge PRIVATE WCLAP_WASMTIME_TARGET="${WCLAP_WASMTIME_TARGET}")
+endif()
+
 target_include_directories(wclap-bridge PRIVATE wasmtime)
 target_link_libraries(wclap-bridge PRIVATE wasmtime)

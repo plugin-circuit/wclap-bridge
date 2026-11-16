@@ -41,6 +41,15 @@ bool wclap_wasmtime::InstanceGroup::globalInit(unsigned int timeLimitMs) {
 		return false;
 	}
 
+#ifdef WCLAP_WASMTIME_TARGET
+	// Compile target chosen at build time (CMake WCLAP_WASMTIME_TARGET), e.g. "pulley64": Wasmtime's portable
+	// interpreter, which needs no executable memory (iOS). Default: the native Cranelift backend.
+	if (auto *targetError = wasmtime_config_target_set(config, WCLAP_WASMTIME_TARGET)) {
+		logError(targetError);
+		wasmtime_error_delete(targetError);
+	}
+#endif
+
 	// Many WCLAPs are C++ built with -fwasm-exceptions (e.g. JUCE ports): enable the exceptions proposal
 	wasmtime_config_wasm_exceptions_set(config, true);
 
