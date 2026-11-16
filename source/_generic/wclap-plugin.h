@@ -262,12 +262,14 @@ private:
 		GET_HOST_EXT(hostVoiceInfo, CLAP_EXT_VOICE_INFO);
 #undef GET_HOST_EXT
 
+		// The WCLAP must be initialised before anything queries its extensions (clap-helpers aborts otherwise)
+		if (!mainThread->call(ptr[&wclap_plugin::init], ptr)) return false;
+
 		// Webview -> GUI helper
 		webviewGui.init(&clapPlugin, host);
 		// Don't query the actual host - the helper does that, and provides this proxy which routes messages appropriately
 		hostWebview = (const clap_host_webview *)webviewGui.extHostWebview;
-
-		return mainThread->call(ptr[&wclap_plugin::init], ptr);
+		return true;
 	}
 	void pluginDestroy() {
 		mainThread->call(ptr[&wclap_plugin::destroy], ptr);
