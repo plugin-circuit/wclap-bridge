@@ -199,6 +199,13 @@ struct WclapModule : public WclapModuleBase {
 		wclapPortSurroundPtr = scoped.writeString(CLAP_PORT_SURROUND);
 		wclapPortAmbisonicPtr = scoped.writeString(CLAP_PORT_AMBISONIC);
 		wclapPortOtherPtr = scoped.writeString("(unknown host port type)");
+		// The host struct handed to the WCLAP: plugins check clap_version_is_compatible(host->clap_version)
+		// (e.g. JUCE-based WCLAPs refuse to create a plugin for a {0,0,0} host) and may read the strings.
+		hostTemplate.clap_version = {CLAP_VERSION_MAJOR, CLAP_VERSION_MINOR, CLAP_VERSION_REVISION};
+		hostTemplate.name = scoped.writeString("WCLAP Bridge");
+		hostTemplate.vendor = scoped.writeString("WebCLAP");
+		hostTemplate.url = scoped.writeString("https://github.com/WebCLAP/wclap-bridge");
+		hostTemplate.version = scoped.writeString("1.0.0");
 		hostTrackInfoPtr = scoped.copyAcross(hostTrackInfo);
 		hostVoiceInfoPtr = scoped.copyAcross(hostVoiceInfo);
 		
