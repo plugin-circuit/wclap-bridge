@@ -10,18 +10,24 @@
 #include "./wclap-module.h"
 
 #include <mutex>
+#include <string>
 #include <fstream>
 
 std::mutex globalInitMutex;
 std::atomic<size_t> globalInitMs = 0;
 std::atomic<size_t> activeWclapCount = 0;
 std::atomic<bool> globalInitOK = false;
+std::string globalInitCacheConfig; // guarded by globalInitMutex
 
 bool wclap_global_init(unsigned int timeLimitMs) {
+	return wclap_global_init_with_cache(timeLimitMs, nullptr);
+}
+bool wclap_global_init_with_cache(unsigned int timeLimitMs, const char *compileCacheConfig) {
 	std::lock_guard<std::mutex> lock{globalInitMutex};
 	auto ms = (size_t)timeLimitMs;
+	std::string cacheConfig = compileCacheConfig ? compileCacheConfig : "";
 	if (globalInitOK) {
-		if (ms == globalInitMs) return true;
+		if (ms == globalInitMs && cacheConfig == globalInitCacheConfig) return true;
 		if (activeWclapCount > 0) {
 			std::cerr << "Tried to reconfigure WCLAP bridge while WCLAPs are still active\n";
 			abort();
@@ -29,7 +35,8 @@ bool wclap_global_init(unsigned int timeLimitMs) {
 		instanceGlobalDeinit();
 	}
 	globalInitMs = ms;
-	globalInitOK = instanceGlobalInit(ms);
+	globalInitCacheConfig = cacheConfig;
+	globalInitOK = instanceGlobalInit(ms, compileCacheConfig);
 	return globalInitOK;
 }
 void wclap_global_deinit() {

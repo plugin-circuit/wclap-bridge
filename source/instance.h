@@ -9,8 +9,8 @@ InstanceGroup * createInstanceGroup(const unsigned char *wasmBytes, size_t wasmL
 	return new InstanceGroup(wasmBytes, wasmLength, wclapDir, presetDir, cacheDir, varDir);
 }
 
-bool instanceGlobalInit(unsigned int timeLimitMs) {
-	return wclap_wasmtime::InstanceGroup::globalInit(timeLimitMs);
+bool instanceGlobalInit(unsigned int timeLimitMs, const char *compileCacheConfig) {
+	return wclap_wasmtime::InstanceGroup::globalInit(timeLimitMs, compileCacheConfig);
 }
 void instanceGlobalDeinit() {
 	return wclap_wasmtime::InstanceGroup::globalDeinit();

@@ -2,6 +2,10 @@
 unsafe extern "C" {
 
     pub fn wclap_global_init(timeLimitMs: ::std::os::raw::c_uint) -> bool;
+    pub fn wclap_global_init_with_cache(
+        timeLimitMs: ::std::os::raw::c_uint,
+        compileCacheConfig: *const ::std::os::raw::c_char,
+    ) -> bool;
     pub fn wclap_global_deinit();
 
     pub fn wclap_open(wclapDir: *const ::std::os::raw::c_char) -> *mut ::std::os::raw::c_void;

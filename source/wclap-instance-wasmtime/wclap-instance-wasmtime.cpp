@@ -28,13 +28,21 @@ std::unique_ptr<wclap::Instance<wclap_wasmtime::InstanceImpl>> wclap_wasmtime::I
 	return std::unique_ptr<wclap::Instance<wclap_wasmtime::InstanceImpl>>{thread};
 }
 
-bool wclap_wasmtime::InstanceGroup::globalInit(unsigned int timeLimitMs) {
+bool wclap_wasmtime::InstanceGroup::globalInit(unsigned int timeLimitMs, const char *compileCacheConfig) {
 	wasm_config_t *config = wasm_config_new();
 	if (!config) {
 		std::cerr << "couldn't create Wasmtime config\n";
 		return false;
 	}
-	auto error = wasmtime_config_cache_config_load(config, nullptr);
+	// compiled modules are cached on disk; null: Wasmtime's default settings and location
+	auto error = wasmtime_config_cache_config_load(config, compileCacheConfig);
+	if (error && compileCacheConfig) {
+		// a broken cache config shouldn't stop every WCLAP from loading: fall back to the default cache
+		std::cerr << "WCLAP: couldn't use the compile cache config " << compileCacheConfig << ", using Wasmtime's defaults\n";
+		logError(error);
+		wasmtime_error_delete(error);
+		error = wasmtime_config_cache_config_load(config, nullptr);
+	}
 	if (error) {
 		logError(error);
 		wasmtime_error_delete(error);

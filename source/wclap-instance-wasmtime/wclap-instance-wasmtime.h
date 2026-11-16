@@ -294,7 +294,7 @@ struct InstanceGroup {
 		return wasm64;
 	}
 
-	static bool globalInit(unsigned int timeLimitMs);
+	static bool globalInit(unsigned int timeLimitMs, const char *compileCacheConfig);
 	static void globalDeinit();
 	
 	wasmtime_module_t *wtModule = nullptr;

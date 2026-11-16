@@ -9,6 +9,10 @@ extern "C" {
 
 // 0 means no limit
 bool wclap_global_init(unsigned int timeLimitMs);
+// Like `wclap_global_init()`, with Wasmtime's compilation cache configured by the TOML file at `compileCacheConfig`
+// (e.g. its `directory` and `files-total-size-soft-limit`, see https://docs.wasmtime.dev/cli-cache.html).
+// Null uses Wasmtime's default cache settings, as `wclap_global_init()` does.
+bool wclap_global_init_with_cache(unsigned int timeLimitMs, const char *compileCacheConfig);
 void wclap_global_deinit();
 
 // Opens a WCLAP, returning an opaque identifier (or null if there was an IO failure).  Even if it returns a non-null handle, you should immediately check `wclap_get_error()`
