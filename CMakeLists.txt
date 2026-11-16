@@ -32,7 +32,9 @@ if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
 endif()
 target_link_libraries(wclap-bridge PRIVATE wclap-cpp webview-gui)
 
-include(wasmtime-fetched.cmake)
+if(NOT TARGET wasmtime) # a parent project may provide its own Wasmtime build (e.g. for iOS)
+	include(wasmtime-fetched.cmake)
+endif()
 
 target_include_directories(wclap-bridge PRIVATE wasmtime)
 target_link_libraries(wclap-bridge PRIVATE wasmtime)
